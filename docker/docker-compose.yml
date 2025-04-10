@@ -1,0 +1,60 @@
+version: '3'
+
+services:
+  # 数据库
+  postgres:
+    image: postgres:14
+    container_name: p3-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: p3
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # 缓存
+  redis:
+    image: redis:6
+    container_name: p3-redis
+    restart: always
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+
+  # 服务端
+  server:
+    build:
+      context: ../server
+      dockerfile: ../docker/server/Dockerfile
+    container_name: p3-server
+    restart: always
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8080:8080"
+      - "27182:27182/udp"
+      - "27183:27183/udp"
+      - "27184:27184"
+    volumes:
+      - ../server/config.yaml:/app/config.yaml
+
+  # Web 管理平台
+  web:
+    build:
+      context: ../web
+      dockerfile: ../docker/web/Dockerfile
+    container_name: p3-web
+    restart: always
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:
+  redis_data:

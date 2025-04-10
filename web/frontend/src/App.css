@@ -1,0 +1,36 @@
+.app-layout {
+  min-height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
+  z-index: 1;
+}
+
+.app-logo {
+  height: 32px;
+  margin-right: 16px;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.app-content {
+  padding: 24px;
+  background: #f0f2f5;
+}
+
+.app-footer {
+  text-align: center;
+  padding: 16px;
+  color: rgba(0, 0, 0, 0.45);
+  background: #f0f2f5;
+}
