@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -177,7 +178,7 @@ func (e *Engine) Stop() error {
 // Connect 连接到对等节点
 func (e *Engine) Connect(peerID string) (*Connection, error) {
 	e.mu.RLock()
-	_, exists := e.peers[peerID]
+	peer, exists := e.peers[peerID]
 	e.mu.RUnlock()
 
 	if !exists {
@@ -194,18 +195,52 @@ func (e *Engine) Connect(peerID string) (*Connection, error) {
 	}
 
 	// 尝试建立连接
-	// TODO: 实现连接逻辑
-	// 1. 尝试直接连接
-	// 2. 尝试 UPnP 连接
-	// 3. 尝试打洞连接
-	// 4. 尝试中继连接
+	var netConn net.Conn
+	var connType ConnectionType
+	var err error
 
-	// 临时返回一个模拟连接
+	// 1. 尝试直接连接
+	if peer.NATType == nat.NATNone || e.natInfo.Type == nat.NATNone {
+		// 如果对方或自己有公网 IP，可以直接连接
+		netConn, err = e.directConnect(peer)
+		if err == nil {
+			connType = ConnectionDirect
+		}
+	}
+
+	// 2. 尝试 UPnP 连接
+	if netConn == nil && e.natInfo.UPnPAvailable {
+		netConn, err = e.upnpConnect(peer)
+		if err == nil {
+			connType = ConnectionUPnP
+		}
+	}
+
+	// 3. 尝试打洞连接
+	if netConn == nil {
+		netConn, connType, err = e.holePunchConnect(peer)
+	}
+
+	// 4. 尝试中继连接
+	if netConn == nil {
+		netConn, err = e.relayConnect(peer)
+		if err == nil {
+			connType = ConnectionRelay
+		}
+	}
+
+	// 如果所有尝试都失败
+	if netConn == nil {
+		return nil, fmt.Errorf("无法连接到对等节点: %s, 所有尝试都失败", peerID)
+	}
+
+	// 创建连接对象
 	conn = &Connection{
 		PeerID:      peerID,
-		Type:        ConnectionDirect,
+		Type:        connType,
 		Established: time.Now(),
 		LastActive:  time.Now(),
+		conn:        netConn,
 	}
 
 	e.mu.Lock()
@@ -213,6 +248,94 @@ func (e *Engine) Connect(peerID string) (*Connection, error) {
 	e.mu.Unlock()
 
 	return conn, nil
+}
+
+// directConnect 直接连接
+func (e *Engine) directConnect(peer *PeerInfo) (net.Conn, error) {
+	// 创建目标地址
+	peerAddr := net.JoinHostPort(peer.ExternalIP.String(), fmt.Sprintf("%d", peer.ExternalPort))
+
+	// 尝试连接
+	conn, err := net.DialTimeout("tcp", peerAddr, 5*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("直接连接失败: %w", err)
+	}
+
+	return conn, nil
+}
+
+// upnpConnect 使用 UPnP 连接
+func (e *Engine) upnpConnect(peer *PeerInfo) (net.Conn, error) {
+	// 使用 UPnP 映射端口
+	port := 10000 + rand.Intn(10000) // 随机端口
+	success, err := nat.UPnPMapping(port, "TCP", "P3 Connection")
+	if err != nil || !success {
+		return nil, fmt.Errorf("UPnP 映射失败: %w", err)
+	}
+
+	// 创建监听器
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		// 删除端口映射
+		_ = nat.UPnPRemoveMapping(port, "TCP")
+		return nil, fmt.Errorf("创建监听器失败: %w", err)
+	}
+	defer listener.Close()
+
+	// 通知对方连接
+	// TODO: 实现信令通道，通知对方连接
+
+	// 等待连接
+	listener.(*net.TCPListener).SetDeadline(time.Now().Add(10 * time.Second))
+	conn, err := listener.Accept()
+	if err != nil {
+		// 删除端口映射
+		_ = nat.UPnPRemoveMapping(port, "TCP")
+		return nil, fmt.Errorf("等待连接超时: %w", err)
+	}
+
+	// 检查连接来源
+	remoteAddr := conn.RemoteAddr().(*net.TCPAddr)
+	if !remoteAddr.IP.Equal(peer.ExternalIP) {
+		conn.Close()
+		// 删除端口映射
+		_ = nat.UPnPRemoveMapping(port, "TCP")
+		return nil, fmt.Errorf("收到非目标地址的连接: %s", remoteAddr.String())
+	}
+
+	// 返回连接
+	return conn, nil
+}
+
+// holePunchConnect 使用打洞连接
+func (e *Engine) holePunchConnect(peer *PeerInfo) (net.Conn, ConnectionType, error) {
+	// 创建打洞器
+	puncher := NewPuncher(e.config.Network.UDPPort1, e.natInfo, 10*time.Second, 5)
+
+	// 尝试打洞
+	result := puncher.Punch(peer.ExternalIP, peer.ExternalPort, peer.NATType)
+	if !result.Success {
+		return nil, ConnectionUnknown, fmt.Errorf("打洞失败: %v", result.Error)
+	}
+
+	// 根据打洞类型返回连接类型
+	var connType ConnectionType
+	if result.Type == PunchUDP {
+		connType = ConnectionHolePunch
+	} else if result.Type == PunchTCP {
+		connType = ConnectionHolePunch
+	} else {
+		result.Conn.Close()
+		return nil, ConnectionUnknown, fmt.Errorf("不支持的打洞类型: %s", result.Type)
+	}
+
+	return result.Conn, connType, nil
+}
+
+// relayConnect 使用中继连接
+func (e *Engine) relayConnect(peer *PeerInfo) (net.Conn, error) {
+	// TODO: 实现中继连接
+	return nil, fmt.Errorf("中继连接尚未实现")
 }
 
 // Disconnect 断开与对等节点的连接

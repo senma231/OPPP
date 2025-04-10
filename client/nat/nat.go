@@ -10,12 +10,12 @@ import (
 type NATType int
 
 const (
-	NATUnknown NATType = iota
-	NATNone           // 无 NAT（公网 IP）
-	NATFull           // 完全锥形 NAT（Full Cone）
-	NATRestricted     // 受限锥形 NAT（Restricted Cone）
-	NATPortRestricted // 端口受限锥形 NAT（Port Restricted Cone）
-	NATSymmetric      // 对称型 NAT（Symmetric）
+	NATUnknown        NATType = iota
+	NATNone                   // 无 NAT（公网 IP）
+	NATFull                   // 完全锥形 NAT（Full Cone）
+	NATRestricted             // 受限锥形 NAT（Restricted Cone）
+	NATPortRestricted         // 端口受限锥形 NAT（Port Restricted Cone）
+	NATSymmetric              // 对称型 NAT（Symmetric）
 )
 
 // String 返回 NAT 类型的字符串表示
@@ -38,11 +38,11 @@ func (t NATType) String() string {
 
 // NATInfo 存储 NAT 相关信息
 type NATInfo struct {
-	Type       NATType
-	ExternalIP net.IP
-	ExternalPort int
-	LocalIP    net.IP
-	LocalPort  int
+	Type          NATType
+	ExternalIP    net.IP
+	ExternalPort  int
+	LocalIP       net.IP
+	LocalPort     int
 	UPnPAvailable bool
 }
 
@@ -77,35 +77,78 @@ func NewDetector(stunServers []string, timeout time.Duration) *Detector {
 
 // Detect 检测 NAT 类型
 func (d *Detector) Detect() (*NATInfo, error) {
-	// TODO: 实现 NAT 类型检测
-	// 1. 使用 STUN 协议检测 NAT 类型
-	// 2. 检测是否支持 UPnP
-	// 3. 获取外部 IP 和端口
+	// 创建 STUN 客户端
+	stunClient := NewSTUNClient(d.STUNServers, d.Timeout)
 
-	// 临时返回一个模拟结果
+	// 检测 NAT 类型
+	natType, err := stunClient.DetectNATType()
+	if err != nil {
+		return nil, fmt.Errorf("NAT 类型检测失败: %w", err)
+	}
+
+	// 获取外部 IP 和端口
+	externalIP, externalPort, err := stunClient.Discover()
+	if err != nil {
+		return nil, fmt.Errorf("获取外部地址失败: %w", err)
+	}
+
+	// 获取本地 IP
+	localIP, err := getLocalIP()
+	if err != nil {
+		return nil, fmt.Errorf("获取本地 IP 失败: %w", err)
+	}
+
+	// 检测是否支持 UPnP
+	upnpAvailable := false
+	if natType != NATNone {
+		// 尝试映射一个测试端口
+		available, _ := UPnPMapping(12345, "UDP", "P3 NAT Test")
+		upnpAvailable = available
+		// 如果成功映射，删除映射
+		if upnpAvailable {
+			_ = UPnPRemoveMapping(12345, "UDP")
+		}
+	}
+
 	return &NATInfo{
-		Type:          NATPortRestricted,
-		ExternalIP:    net.ParseIP("203.0.113.1"),
-		ExternalPort:  12345,
-		LocalIP:       net.ParseIP("192.168.1.2"),
-		LocalPort:     27182,
-		UPnPAvailable: false,
+		Type:          natType,
+		ExternalIP:    externalIP,
+		ExternalPort:  externalPort,
+		LocalIP:       localIP,
+		LocalPort:     0, // 当前未知，需要在实际使用时设置
+		UPnPAvailable: upnpAvailable,
 	}, nil
 }
 
 // UPnPMapping 尝试通过 UPnP 映射端口
 func UPnPMapping(port int, protocol string, description string) (bool, error) {
-	// TODO: 实现 UPnP 端口映射
-	// 1. 发现 UPnP 设备
-	// 2. 获取外部 IP
-	// 3. 添加端口映射
+	// 创建 UPnP 客户端
+	upnpClient := NewUPnPClient(5 * time.Second)
 
-	return false, fmt.Errorf("UPnP 端口映射尚未实现")
+	// 检查 UPnP 是否可用
+	if !upnpClient.IsUPnPAvailable() {
+		return false, fmt.Errorf("UPnP 不可用")
+	}
+
+	// 添加端口映射
+	success, _, err := upnpClient.AddPortMapping(port, port, protocol, description)
+	if err != nil {
+		return false, fmt.Errorf("添加端口映射失败: %w", err)
+	}
+
+	return success, nil
 }
 
 // UPnPRemoveMapping 移除 UPnP 端口映射
 func UPnPRemoveMapping(port int, protocol string) error {
-	// TODO: 实现移除 UPnP 端口映射
+	// 创建 UPnP 客户端
+	upnpClient := NewUPnPClient(5 * time.Second)
 
-	return fmt.Errorf("移除 UPnP 端口映射尚未实现")
+	// 删除端口映射
+	err := upnpClient.DeletePortMapping(port, protocol)
+	if err != nil {
+		return fmt.Errorf("删除端口映射失败: %w", err)
+	}
+
+	return nil
 }

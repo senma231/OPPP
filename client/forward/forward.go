@@ -59,18 +59,20 @@ func (s *ForwardStats) IncrementConnections() {
 
 // Forwarder 端口转发器
 type Forwarder struct {
-	rules     map[string]*ForwardRule
-	listeners map[string]net.Listener
-	mu        sync.RWMutex
-	done      chan struct{}
+	rules        map[string]*ForwardRule
+	listeners    map[string]net.Listener
+	udpListeners map[string]*net.UDPConn
+	mu           sync.RWMutex
+	done         chan struct{}
 }
 
 // NewForwarder 创建一个新的端口转发器
 func NewForwarder() *Forwarder {
 	return &Forwarder{
-		rules:     make(map[string]*ForwardRule),
-		listeners: make(map[string]net.Listener),
-		done:      make(chan struct{}),
+		rules:        make(map[string]*ForwardRule),
+		listeners:    make(map[string]net.Listener),
+		udpListeners: make(map[string]*net.UDPConn),
+		done:         make(chan struct{}),
 	}
 }
 
@@ -288,7 +290,8 @@ func (f *Forwarder) handleTCPConnection(clientConn net.Conn, rule *ForwardRule) 
 	defer clientConn.Close()
 
 	// 连接目标服务器
-	targetConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", rule.DstHost, rule.DstPort))
+	targetAddr := net.JoinHostPort(rule.DstHost, fmt.Sprintf("%d", rule.DstPort))
+	targetConn, err := net.Dial("tcp", targetAddr)
 	if err != nil {
 		// TODO: 记录错误日志
 		return
@@ -324,12 +327,191 @@ func (f *Forwarder) handleTCPConnection(clientConn net.Conn, rule *ForwardRule) 
 
 // startUDPForwarding 启动 UDP 转发
 func (f *Forwarder) startUDPForwarding(rule *ForwardRule) error {
-	// TODO: 实现 UDP 转发
-	return fmt.Errorf("UDP 转发尚未实现")
+	// 监听本地 UDP 端口
+	listener, err := net.ListenUDP("udp", &net.UDPAddr{Port: rule.SrcPort})
+	if err != nil {
+		return fmt.Errorf("监听 UDP 端口 %d 失败: %w", rule.SrcPort, err)
+	}
+
+	// 存储监听器
+	f.mu.Lock()
+	f.udpListeners[rule.ID] = listener
+	f.mu.Unlock()
+
+	// 创建会话映射
+	sessions := make(map[string]*udpSession)
+	sessionsMutex := &sync.RWMutex{}
+
+	// 启动 goroutine 处理数据
+	go func() {
+		buf := make([]byte, 65507) // UDP 最大包大小
+		for {
+			select {
+			case <-f.done:
+				return
+			default:
+				// 设置读取超时
+				listener.SetReadDeadline(time.Now().Add(1 * time.Second))
+
+				// 读取数据
+				n, clientAddr, err := listener.ReadFromUDP(buf)
+				if err != nil {
+					// 检查是否是超时错误
+					if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+						continue
+					}
+
+					// 检查是否是因为关闭监听器导致的错误
+					select {
+					case <-f.done:
+						return
+					default:
+						// TODO: 记录错误日志
+						continue
+					}
+				}
+
+				// 增加连接计数
+				rule.Stats.IncrementConnections()
+
+				// 获取或创建会话
+				clientKey := clientAddr.String()
+				sessionsMutex.RLock()
+				session, exists := sessions[clientKey]
+				sessionsMutex.RUnlock()
+
+				if !exists {
+					// 创建到目标的连接
+					targetAddrStr := net.JoinHostPort(rule.DstHost, fmt.Sprintf("%d", rule.DstPort))
+					targetAddr, err := net.ResolveUDPAddr("udp", targetAddrStr)
+					if err != nil {
+						// TODO: 记录错误日志
+						continue
+					}
+
+					targetConn, err := net.DialUDP("udp", nil, targetAddr)
+					if err != nil {
+						// TODO: 记录错误日志
+						continue
+					}
+
+					// 创建新会话
+					session = &udpSession{
+						clientAddr: clientAddr,
+						targetConn: targetConn,
+						lastActive: time.Now(),
+					}
+
+					sessionsMutex.Lock()
+					sessions[clientKey] = session
+					sessionsMutex.Unlock()
+
+					// 启动 goroutine 处理目标到客户端的数据
+					go func() {
+						targetBuf := make([]byte, 65507)
+						for {
+							// 设置读取超时
+							targetConn.SetReadDeadline(time.Now().Add(30 * time.Second))
+
+							// 读取数据
+							n, err := targetConn.Read(targetBuf)
+							if err != nil {
+								// 检查是否是超时错误
+								if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+									// 检查会话是否过期
+									sessionsMutex.RLock()
+									lastActive := session.lastActive
+									sessionsMutex.RUnlock()
+
+									if time.Since(lastActive) > 60*time.Second {
+										// 关闭连接
+										targetConn.Close()
+
+										// 移除会话
+										sessionsMutex.Lock()
+										delete(sessions, clientKey)
+										sessionsMutex.Unlock()
+
+										return
+									}
+
+									continue
+								}
+
+								// 其他错误
+								// TODO: 记录错误日志
+
+								// 关闭连接
+								targetConn.Close()
+
+								// 移除会话
+								sessionsMutex.Lock()
+								delete(sessions, clientKey)
+								sessionsMutex.Unlock()
+
+								return
+							}
+
+							// 发送数据到客户端
+							_, err = listener.WriteToUDP(targetBuf[:n], clientAddr)
+							if err != nil {
+								// TODO: 记录错误日志
+								continue
+							}
+
+							// 更新统计信息
+							rule.Stats.AddBytesReceived(uint64(n))
+
+							// 更新最后活动时间
+							sessionsMutex.Lock()
+							session.lastActive = time.Now()
+							sessionsMutex.Unlock()
+						}
+					}()
+				} else {
+					// 更新最后活动时间
+					sessionsMutex.Lock()
+					session.lastActive = time.Now()
+					sessionsMutex.Unlock()
+				}
+
+				// 发送数据到目标
+				_, err = session.targetConn.Write(buf[:n])
+				if err != nil {
+					// TODO: 记录错误日志
+					continue
+				}
+
+				// 更新统计信息
+				rule.Stats.AddBytesSent(uint64(n))
+			}
+		}
+	}()
+
+	return nil
 }
 
 // stopUDPForwarding 停止 UDP 转发
 func (f *Forwarder) stopUDPForwarding(rule *ForwardRule) error {
-	// TODO: 实现停止 UDP 转发
-	return fmt.Errorf("停止 UDP 转发尚未实现")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	listener, exists := f.udpListeners[rule.ID]
+	if !exists {
+		return nil // 没有监听器，无需操作
+	}
+
+	if err := listener.Close(); err != nil {
+		return fmt.Errorf("关闭 UDP 监听器失败: %w", err)
+	}
+
+	delete(f.udpListeners, rule.ID)
+	return nil
+}
+
+// udpSession UDP 会话
+type udpSession struct {
+	clientAddr *net.UDPAddr
+	targetConn *net.UDPConn
+	lastActive time.Time
 }
