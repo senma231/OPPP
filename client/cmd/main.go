@@ -6,14 +6,16 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
-	"github.com/senma231/p3/client/config"
-	"github.com/senma231/p3/client/core"
-	"github.com/senma231/p3/client/forward"
-	"github.com/senma231/p3/client/nat"
-	"github.com/senma231/p3/client/service"
+	"../config"
+	"../core"
+	"../forward"
+	"../nat"
+	"../service"
 )
 
 func main() {
@@ -36,20 +38,22 @@ func main() {
 
 	// 命令行参数覆盖配置文件
 	if *node != "" {
-		cfg.Network.Node = *node
+		cfg.Node.ID = *node
 	}
 	if *token != "" {
-		cfg.Network.Token = *token
+		cfg.Node.Token = *token
 	}
 	if *shareBandwidth >= 0 {
-		cfg.Network.ShareBandwidth = *shareBandwidth
+		// 注意：新的配置结构中没有 ShareBandwidth 字段
+		// 这里我们可以将其保存在环境变量中
+		os.Setenv("P3_SHARE_BANDWIDTH", fmt.Sprintf("%d", *shareBandwidth))
 	}
 
 	// 检查必要参数
-	if cfg.Network.Node == "" {
+	if cfg.Node.ID == "" {
 		log.Fatal("节点名称不能为空，请使用 -node 参数指定")
 	}
-	if cfg.Network.Token == "" {
+	if cfg.Node.Token == "" {
 		log.Fatal("认证令牌不能为空，请使用 -token 参数指定")
 	}
 
@@ -73,9 +77,9 @@ func main() {
 
 	// 打印启动信息
 	fmt.Println("P3 客户端启动中...")
-	fmt.Printf("版本: %s\n", cfg.Version)
-	fmt.Printf("节点名称: %s\n", cfg.Network.Node)
-	fmt.Printf("共享带宽: %d Mbps\n", cfg.Network.ShareBandwidth)
+	fmt.Printf("节点 ID: %s\n", cfg.Node.ID)
+	fmt.Printf("服务器地址: %s\n", cfg.Server.Address)
+	fmt.Printf("共享带宽: %s Mbps\n", os.Getenv("P3_SHARE_BANDWIDTH"))
 
 	// 检测 NAT 类型
 	detector := nat.NewDetector(nil, 5*time.Second)
@@ -90,7 +94,30 @@ func main() {
 	}
 
 	// 初始化 P2P 引擎
-	engine := core.NewEngine(cfg)
+	// 从配置中提取服务器地址和端口
+	serverHost := ""
+	serverPort := 8080
+	if cfg.Server.Address != "" {
+		// 解析服务器地址
+		if strings.HasPrefix(cfg.Server.Address, "http://") {
+			serverHost = strings.TrimPrefix(cfg.Server.Address, "http://")
+		} else if strings.HasPrefix(cfg.Server.Address, "https://") {
+			serverHost = strings.TrimPrefix(cfg.Server.Address, "https://")
+		} else {
+			serverHost = cfg.Server.Address
+		}
+
+		// 如果地址包含端口，提取端口
+		parts := strings.Split(serverHost, ":")
+		if len(parts) > 1 {
+			serverHost = parts[0]
+			if p, err := strconv.Atoi(parts[1]); err == nil {
+				serverPort = p
+			}
+		}
+	}
+
+	engine := core.NewEngine(cfg.Node.ID, cfg.Node.Token, serverHost, serverPort)
 	if err := engine.Start(); err != nil {
 		log.Fatalf("启动 P2P 引擎失败: %v", err)
 	}
@@ -101,12 +128,12 @@ func main() {
 	// 加载转发规则
 	for _, appConfig := range cfg.Apps {
 		rule := &forward.ForwardRule{
-			ID:          appConfig.AppName,
+			ID:          appConfig.Name,
 			Protocol:    appConfig.Protocol,
 			SrcPort:     appConfig.SrcPort,
 			DstHost:     appConfig.DstHost,
 			DstPort:     appConfig.DstPort,
-			Description: appConfig.AppName,
+			Description: appConfig.Name,
 			Enabled:     true,
 		}
 
