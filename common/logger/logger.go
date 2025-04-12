@@ -23,6 +23,8 @@ const (
 	WarnLevel
 	// ErrorLevel 错误级别
 	ErrorLevel
+	// FatalLevel 致命级别
+	FatalLevel
 )
 
 // String 返回日志级别的字符串表示
@@ -36,6 +38,8 @@ func (l Level) String() string {
 		return "WARN"
 	case ErrorLevel:
 		return "ERROR"
+	case FatalLevel:
+		return "FATAL"
 	default:
 		return "UNKNOWN"
 	}
@@ -52,6 +56,8 @@ func ParseLevel(level string) Level {
 		return WarnLevel
 	case "error":
 		return ErrorLevel
+	case "fatal":
+		return FatalLevel
 	default:
 		return InfoLevel
 	}
@@ -160,6 +166,12 @@ func (l *Logger) Error(format string, args ...interface{}) {
 	l.log(ErrorLevel, format, args...)
 }
 
+// Fatal 记录致命级别日志并退出程序
+func (l *Logger) Fatal(format string, args ...interface{}) {
+	l.log(FatalLevel, format, args...)
+	os.Exit(1)
+}
+
 // Debug 记录调试级别日志
 func Debug(format string, args ...interface{}) {
 	DefaultLogger.Debug(format, args...)
@@ -178,6 +190,11 @@ func Warn(format string, args ...interface{}) {
 // Error 记录错误级别日志
 func Error(format string, args ...interface{}) {
 	DefaultLogger.Error(format, args...)
+}
+
+// Fatal 记录致命级别日志并退出程序
+func Fatal(format string, args ...interface{}) {
+	DefaultLogger.Fatal(format, args...)
 }
 
 // SetLevel 设置默认日志记录器的日志级别

@@ -22,6 +22,20 @@ security:
   certFile: cert.pem
   keyFile: key.pem
   caFile: ca.pem
+  verifyPeer: true
+  cipherSuites:
+    - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+    - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+  minTLSVersion: "1.2"
+
+performance:
+  maxConnections: 100
+  connectionTimeout: 30
+  keepAliveInterval: 15
+  bufferSize: 4096
+  bandwidthLimit:
+    upload: 1024    # KB/s, 0 means no limit
+    download: 1024  # KB/s, 0 means no limit
 
 logging:
   level: info

@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // NodeConfig 节点配置
@@ -85,8 +87,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	// 解析配置文件
-	// 注意：这里我们暂时省略了 yaml 解析，因为我们还没有安装 yaml 包
-	// 在实际实现中，应该使用 yaml.Unmarshal(data, config)
+	if err := yaml.Unmarshal(data, config); err != nil {
+		return nil, fmt.Errorf("解析配置文件失败: %w", err)
+	}
 
 	// 从环境变量加载配置
 	loadFromEnv(config)
@@ -145,9 +148,15 @@ func DefaultConfig() *Config {
 
 // SaveConfig 保存配置到文件
 func SaveConfig(config *Config, path string) error {
-	// 注意：这里我们暂时省略了 yaml 序列化，因为我们还没有安装 yaml 包
-	// 在实际实现中，应该使用 yaml.Marshal(config)
-	data := []byte("# P3 客户端配置文件\n")
+	// 序列化配置
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+
+	// 添加注释
+	header := []byte("# P3 客户端配置文件\n")
+	data = append(header, data...)
 
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("写入配置文件失败: %w", err)

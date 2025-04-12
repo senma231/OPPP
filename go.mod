@@ -1,8 +1,14 @@
-module github.com/senma231/OPPP
+module github.com/senma231/p3
 
-go 1.24.0
+go 1.20
 
-require github.com/gin-gonic/gin v1.10.0
+require (
+	github.com/gin-gonic/gin v1.9.1
+	github.com/golang-jwt/jwt/v4 v4.5.0
+	github.com/pquerna/otp v1.4.0
+	golang.org/x/crypto v0.23.0
+	gopkg.in/yaml.v3 v3.0.1
+)
 
 require (
 	github.com/bytedance/sonic v1.11.6 // indirect
