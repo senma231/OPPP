@@ -6,16 +6,14 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
-	"../config"
-	"../core"
-	"../forward"
-	"../nat"
-	"../service"
+	"github.com/senma231/p3/client/config"
+	"github.com/senma231/p3/client/core"
+	"github.com/senma231/p3/client/nat"
+	"github.com/senma231/p3/client/p2p"
+	"github.com/senma231/p3/client/service"
 )
 
 func main() {
@@ -44,9 +42,8 @@ func main() {
 		cfg.Node.Token = *token
 	}
 	if *shareBandwidth >= 0 {
-		// 注意：新的配置结构中没有 ShareBandwidth 字段
-		// 这里我们可以将其保存在环境变量中
-		os.Setenv("P3_SHARE_BANDWIDTH", fmt.Sprintf("%d", *shareBandwidth))
+		// 保存共享带宽设置
+		cfg.Performance.BandwidthLimit.Upload = *shareBandwidth
 	}
 
 	// 检查必要参数
@@ -79,13 +76,20 @@ func main() {
 	fmt.Println("P3 客户端启动中...")
 	fmt.Printf("节点 ID: %s\n", cfg.Node.ID)
 	fmt.Printf("服务器地址: %s\n", cfg.Server.Address)
-	fmt.Printf("共享带宽: %s Mbps\n", os.Getenv("P3_SHARE_BANDWIDTH"))
+	fmt.Printf("共享带宽: %d Mbps\n", cfg.Performance.BandwidthLimit.Upload)
 
 	// 检测 NAT 类型
-	detector := nat.NewDetector(nil, 5*time.Second)
+	detector := nat.NewDetector(cfg.Network.STUNServers, 5*time.Second)
 	natInfo, err := detector.Detect()
 	if err != nil {
 		log.Printf("NAT 类型检测失败: %v", err)
+		// 创建一个默认的 NAT 信息
+		natInfo = &nat.NATInfo{
+			Type:          nat.NATUnknown,
+			ExternalIP:    nil,
+			ExternalPort:  0,
+			UPnPAvailable: false,
+		}
 	} else {
 		fmt.Printf("NAT 类型: %s\n", natInfo.Type)
 		fmt.Printf("外部 IP: %s\n", natInfo.ExternalIP)
@@ -93,55 +97,28 @@ func main() {
 		fmt.Printf("UPnP 可用: %t\n", natInfo.UPnPAvailable)
 	}
 
-	// 初始化 P2P 引擎
-	// 从配置中提取服务器地址和端口
-	serverHost := ""
-	serverPort := 8080
-	if cfg.Server.Address != "" {
-		// 解析服务器地址
-		if strings.HasPrefix(cfg.Server.Address, "http://") {
-			serverHost = strings.TrimPrefix(cfg.Server.Address, "http://")
-		} else if strings.HasPrefix(cfg.Server.Address, "https://") {
-			serverHost = strings.TrimPrefix(cfg.Server.Address, "https://")
-		} else {
-			serverHost = cfg.Server.Address
-		}
+	// 创建信令客户端
+	signalingClient := p2p.NewSignalingClient(cfg, natInfo)
 
-		// 如果地址包含端口，提取端口
-		parts := strings.Split(serverHost, ":")
-		if len(parts) > 1 {
-			serverHost = parts[0]
-			if p, err := strconv.Atoi(parts[1]); err == nil {
-				serverPort = p
-			}
-		}
+	// 连接到信令服务器
+	if err := signalingClient.Connect(); err != nil {
+		log.Printf("连接到信令服务器失败: %v", err)
+	} else {
+		fmt.Println("已连接到信令服务器")
 	}
 
-	engine := core.NewEngine(cfg.Node.ID, cfg.Node.Token, serverHost, serverPort)
+	// 创建 P2P 连接器
+	connector := p2p.NewConnector(cfg, natInfo, signalingClient)
+
+	// 创建引擎
+	engine := core.NewEngine(cfg)
+
+	// 设置 P2P 连接器
+	engine.SetConnector(connector)
+
+	// 启动引擎
 	if err := engine.Start(); err != nil {
-		log.Fatalf("启动 P2P 引擎失败: %v", err)
-	}
-
-	// 初始化端口转发器
-	forwarder := forward.NewForwarder()
-
-	// 加载转发规则
-	for _, appConfig := range cfg.Apps {
-		rule := &forward.ForwardRule{
-			ID:          appConfig.Name,
-			Protocol:    appConfig.Protocol,
-			SrcPort:     appConfig.SrcPort,
-			DstHost:     appConfig.DstHost,
-			DstPort:     appConfig.DstPort,
-			Description: appConfig.Name,
-			Enabled:     true,
-		}
-
-		if err := forwarder.AddRule(rule); err != nil {
-			log.Printf("添加转发规则失败: %v", err)
-		} else {
-			fmt.Printf("添加转发规则: %s -> %s:%d\n", rule.ID, rule.DstHost, rule.DstPort)
-		}
+		log.Fatalf("启动引擎失败: %v", err)
 	}
 
 	// 如果是守护进程模式，启动监控
@@ -158,14 +135,14 @@ func main() {
 	// 优雅关闭
 	fmt.Println("正在关闭客户端...")
 
-	// 关闭端口转发器
-	if err := forwarder.Close(); err != nil {
-		log.Printf("关闭端口转发器失败: %v", err)
+	// 断开与信令服务器的连接
+	if err := signalingClient.Disconnect(); err != nil {
+		log.Printf("断开与信令服务器的连接失败: %v", err)
 	}
 
-	// 关闭 P2P 引擎
+	// 关闭引擎
 	if err := engine.Stop(); err != nil {
-		log.Printf("关闭 P2P 引擎失败: %v", err)
+		log.Printf("关闭引擎失败: %v", err)
 	}
 
 	fmt.Println("客户端已关闭")

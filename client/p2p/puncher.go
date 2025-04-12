@@ -11,34 +11,10 @@ import (
 
 // PunchResult 打洞结果
 type PunchResult struct {
-	Success      bool
-	Conn         net.Conn
+	Success        bool
+	Conn           net.Conn
 	ConnectionType ConnectionType
-	Error        error
-}
-
-// ConnectionType 连接类型
-type ConnectionType int
-
-const (
-	ConnectionTypeUnknown ConnectionType = iota
-	ConnectionTypeDirect               // 直接连接
-	ConnectionTypeHolePunch            // 打洞连接
-	ConnectionTypeRelay                // 中继连接
-)
-
-// String 返回连接类型的字符串表示
-func (t ConnectionType) String() string {
-	switch t {
-	case ConnectionTypeDirect:
-		return "Direct"
-	case ConnectionTypeHolePunch:
-		return "Hole Punch"
-	case ConnectionTypeRelay:
-		return "Relay"
-	default:
-		return "Unknown"
-	}
+	Error          error
 }
 
 // Puncher 打洞器
@@ -72,8 +48,8 @@ func (p *Puncher) Punch(peerIP string, peerPort int, peerNATType nat.NATType) *P
 		conn, err := p.directConnect(peerIP, peerPort)
 		if err == nil {
 			return &PunchResult{
-				Success:      true,
-				Conn:         conn,
+				Success:        true,
+				Conn:           conn,
 				ConnectionType: ConnectionTypeDirect,
 			}
 		}
@@ -83,17 +59,17 @@ func (p *Puncher) Punch(peerIP string, peerPort int, peerNATType nat.NATType) *P
 	conn, err := p.holePunch(peerIP, peerPort, peerNATType)
 	if err == nil {
 		return &PunchResult{
-			Success:      true,
-			Conn:         conn,
+			Success:        true,
+			Conn:           conn,
 			ConnectionType: ConnectionTypeHolePunch,
 		}
 	}
 
 	// 打洞失败
 	return &PunchResult{
-		Success:      false,
+		Success:        false,
 		ConnectionType: ConnectionTypeUnknown,
-		Error:        err,
+		Error:          err,
 	}
 }
 
@@ -229,9 +205,9 @@ func (p *Puncher) PunchWithRelay(relayServer string, peerID string) *PunchResult
 	conn, err := net.DialTimeout("tcp", relayServer, p.timeout)
 	if err != nil {
 		return &PunchResult{
-			Success:      false,
+			Success:        false,
 			ConnectionType: ConnectionTypeUnknown,
-			Error:        fmt.Errorf("连接中继服务器失败: %w", err),
+			Error:          fmt.Errorf("连接中继服务器失败: %w", err),
 		}
 	}
 
@@ -241,9 +217,9 @@ func (p *Puncher) PunchWithRelay(relayServer string, peerID string) *PunchResult
 	if err != nil {
 		conn.Close()
 		return &PunchResult{
-			Success:      false,
+			Success:        false,
 			ConnectionType: ConnectionTypeUnknown,
-			Error:        fmt.Errorf("发送中继请求失败: %w", err),
+			Error:          fmt.Errorf("发送中继请求失败: %w", err),
 		}
 	}
 
@@ -256,9 +232,9 @@ func (p *Puncher) PunchWithRelay(relayServer string, peerID string) *PunchResult
 	if err != nil {
 		conn.Close()
 		return &PunchResult{
-			Success:      false,
+			Success:        false,
 			ConnectionType: ConnectionTypeUnknown,
-			Error:        fmt.Errorf("接收中继响应失败: %w", err),
+			Error:          fmt.Errorf("接收中继响应失败: %w", err),
 		}
 	}
 
@@ -267,16 +243,16 @@ func (p *Puncher) PunchWithRelay(relayServer string, peerID string) *PunchResult
 	if response != "OK" {
 		conn.Close()
 		return &PunchResult{
-			Success:      false,
+			Success:        false,
 			ConnectionType: ConnectionTypeUnknown,
-			Error:        fmt.Errorf("中继服务器拒绝请求: %s", response),
+			Error:          fmt.Errorf("中继服务器拒绝请求: %s", response),
 		}
 	}
 
 	// 中继连接成功
 	return &PunchResult{
-		Success:      true,
-		Conn:         conn,
+		Success:        true,
+		Conn:           conn,
 		ConnectionType: ConnectionTypeRelay,
 	}
 }

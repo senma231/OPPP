@@ -32,6 +32,9 @@ type NetworkConfig struct {
 		Username string `yaml:"username"`
 		Password string `yaml:"password"`
 	} `yaml:"turnServers"`
+	UDPPort1 int `yaml:"udpPort1"`
+	UDPPort2 int `yaml:"udpPort2"`
+	TCPPort  int `yaml:"tcpPort"`
 }
 
 // SecurityConfig 安全配置
@@ -48,6 +51,18 @@ type LoggingConfig struct {
 	File  string `yaml:"file"`
 }
 
+// PerformanceConfig 性能配置
+type PerformanceConfig struct {
+	MaxConnections    int `yaml:"maxConnections"`
+	ConnectionTimeout int `yaml:"connectionTimeout"`
+	KeepAliveInterval int `yaml:"keepAliveInterval"`
+	BufferSize        int `yaml:"bufferSize"`
+	BandwidthLimit    struct {
+		Upload   int `yaml:"upload"`
+		Download int `yaml:"download"`
+	} `yaml:"bandwidthLimit"`
+}
+
 // AppConfig 应用配置
 type AppConfig struct {
 	Name        string `yaml:"name"`
@@ -62,12 +77,13 @@ type AppConfig struct {
 
 // Config 客户端配置
 type Config struct {
-	Node     NodeConfig     `yaml:"node"`
-	Server   ServerConfig   `yaml:"server"`
-	Network  NetworkConfig  `yaml:"network"`
-	Security SecurityConfig `yaml:"security"`
-	Logging  LoggingConfig  `yaml:"logging"`
-	Apps     []AppConfig    `yaml:"apps"`
+	Node        NodeConfig        `yaml:"node"`
+	Server      ServerConfig      `yaml:"server"`
+	Network     NetworkConfig     `yaml:"network"`
+	Security    SecurityConfig    `yaml:"security"`
+	Logging     LoggingConfig     `yaml:"logging"`
+	Performance PerformanceConfig `yaml:"performance"`
+	Apps        []AppConfig       `yaml:"apps"`
 }
 
 // LoadConfig 从文件加载配置
@@ -131,6 +147,9 @@ func DefaultConfig() *Config {
 					Password: "password",
 				},
 			},
+			UDPPort1: 27182,
+			UDPPort2: 27183,
+			TCPPort:  27184,
 		},
 		Security: SecurityConfig{
 			EnableTLS: true,
@@ -141,6 +160,19 @@ func DefaultConfig() *Config {
 		Logging: LoggingConfig{
 			Level: "info",
 			File:  "p3-client.log",
+		},
+		Performance: PerformanceConfig{
+			MaxConnections:    100,
+			ConnectionTimeout: 30,
+			KeepAliveInterval: 15,
+			BufferSize:        4096,
+			BandwidthLimit: struct {
+				Upload   int `yaml:"upload"`
+				Download int `yaml:"download"`
+			}{
+				Upload:   10,
+				Download: 10,
+			},
 		},
 		Apps: []AppConfig{},
 	}

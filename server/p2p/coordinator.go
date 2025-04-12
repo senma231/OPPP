@@ -16,12 +16,12 @@ import (
 type NATType int
 
 const (
-	NATUnknown NATType = iota
-	NATNone           // 无 NAT（公网 IP）
-	NATFull           // 完全锥形 NAT（Full Cone）
-	NATRestricted     // 受限锥形 NAT（Restricted Cone）
-	NATPortRestricted // 端口受限锥形 NAT（Port Restricted Cone）
-	NATSymmetric      // 对称型 NAT（Symmetric）
+	NATUnknown        NATType = iota
+	NATNone                   // 无 NAT（公网 IP）
+	NATFull                   // 完全锥形 NAT（Full Cone）
+	NATRestricted             // 受限锥形 NAT（Restricted Cone）
+	NATPortRestricted         // 端口受限锥形 NAT（Port Restricted Cone）
+	NATSymmetric              // 对称型 NAT（Symmetric）
 )
 
 // String 返回 NAT 类型的字符串表示
@@ -75,11 +75,11 @@ type PeerInfo struct {
 type ConnectionType int
 
 const (
-	ConnectionUnknown ConnectionType = iota
-	ConnectionDirect               // 直接连接
-	ConnectionUPnP                 // UPnP 连接
-	ConnectionHolePunch            // 打洞连接
-	ConnectionRelay                // 中继连接
+	ConnectionUnknown   ConnectionType = iota
+	ConnectionDirect                   // 直接连接
+	ConnectionUPnP                     // UPnP 连接
+	ConnectionHolePunch                // 打洞连接
+	ConnectionRelay                    // 中继连接
 )
 
 // String 返回连接类型的字符串表示
@@ -116,20 +116,20 @@ func ParseConnectionType(s string) ConnectionType {
 
 // Coordinator P2P 协调器
 type Coordinator struct {
-	config       *config.Config
+	config        *config.Config
 	deviceService *device.Service
-	peers        map[string]*PeerInfo
-	relayNodes   map[string]*PeerInfo
-	mu           sync.RWMutex
+	peers         map[string]*PeerInfo
+	relayNodes    map[string]*PeerInfo
+	mu            sync.RWMutex
 }
 
 // NewCoordinator 创建 P2P 协调器
 func NewCoordinator(cfg *config.Config, deviceService *device.Service) *Coordinator {
 	return &Coordinator{
-		config:       cfg,
+		config:        cfg,
 		deviceService: deviceService,
-		peers:        make(map[string]*PeerInfo),
-		relayNodes:   make(map[string]*PeerInfo),
+		peers:         make(map[string]*PeerInfo),
+		relayNodes:    make(map[string]*PeerInfo),
 	}
 }
 

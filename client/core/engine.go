@@ -10,6 +10,7 @@ import (
 
 	"github.com/senma231/p3/client/config"
 	"github.com/senma231/p3/client/nat"
+	"github.com/senma231/p3/client/p2p"
 )
 
 // ConnectionType 表示连接类型
@@ -118,6 +119,7 @@ type Engine struct {
 	natInfo     *nat.NATInfo
 	peers       map[string]*PeerInfo
 	connections map[string]*Connection
+	connector   *p2p.Connector
 	mu          sync.RWMutex
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -135,20 +137,30 @@ func NewEngine(cfg *config.Config) *Engine {
 	}
 }
 
+// SetConnector 设置 P2P 连接器
+func (e *Engine) SetConnector(connector *p2p.Connector) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.connector = connector
+}
+
 // Start 启动 P2P 引擎
 func (e *Engine) Start() error {
-	// 检测 NAT 类型
-	detector := nat.NewDetector(nil, 5*time.Second)
-	natInfo, err := detector.Detect()
-	if err != nil {
-		return fmt.Errorf("NAT 类型检测失败: %w", err)
-	}
-	e.natInfo = natInfo
+	// 检查是否设置了连接器
+	if e.connector == nil {
+		// 如果没有设置连接器，则使用默认的 NAT 检测
+		detector := nat.NewDetector(e.config.Network.STUNServers, 5*time.Second)
+		natInfo, err := detector.Detect()
+		if err != nil {
+			return fmt.Errorf("NAT 类型检测失败: %w", err)
+		}
+		e.natInfo = natInfo
 
-	fmt.Printf("NAT 类型: %s\n", natInfo.Type)
-	fmt.Printf("外部 IP: %s\n", natInfo.ExternalIP)
-	fmt.Printf("外部端口: %d\n", natInfo.ExternalPort)
-	fmt.Printf("UPnP 可用: %t\n", natInfo.UPnPAvailable)
+		fmt.Printf("NAT 类型: %s\n", natInfo.Type)
+		fmt.Printf("外部 IP: %s\n", natInfo.ExternalIP)
+		fmt.Printf("外部端口: %d\n", natInfo.ExternalPort)
+		fmt.Printf("UPnP 可用: %t\n", natInfo.UPnPAvailable)
+	}
 
 	// TODO: 连接到服务器
 	// TODO: 注册节点
